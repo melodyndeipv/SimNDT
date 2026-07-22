@@ -9,4 +9,5 @@ PyOpenGL==3.1.0
 PySide==1.2.2
 pytools==2019.1.1
 scipy==1.2.3
-
+siphash24
+imageio

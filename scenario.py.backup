@@ -2,8 +2,7 @@ __author__ = 'Miguel Molero'
 
 
 import numpy as np
-from scipy.ndimage import rotate as imrotate
-from imageio import imread
+from scipy.misc  import imread, imrotate
 
 from SimNDT.core.constants import *
 from SimNDT.core.boundary import Boundary
@@ -208,18 +207,18 @@ class Scenario:
 
     def rotate(self, angle=90, direction="clockwise"):
         if direction == "clockwise":
-            self.I = imrotate(self.I, -1*angle, order=0, reshape=True).astype(self.I.dtype)
+            self.I = imrotate(self.I,-1*angle, interp = 'nearest')
             self.M, self.N = np.shape(self.I)
 
             if np.size(self.Iabs) > 1:
-                self.Iabs = imrotate(self.Iabs, -1*angle, order=0, reshape=True).astype(self.Iabs.dtype)
+                self.Iabs = imrotate(self.Iabs,-1*angle, interp = 'nearest')
 
         else:
-            self.I = imrotate(self.I, angle, order=0, reshape=True).astype(self.I.dtype)
+            self.I = imrotate(self.I,angle, interp = 'nearest')
             self.M, self.N = np.shape(self.I)
 
             if np.size(self.Iabs) > 1:
-                self.Iabs = imrotate(self.Iabs, angle, order=0, reshape=True).astype(self.Iabs.dtype)
+                self.Iabs = imrotate(self.Iabs,angle, interp = 'nearest')
 
 
 

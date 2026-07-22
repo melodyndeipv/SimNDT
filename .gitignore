@@ -6,3 +6,15 @@ bin/output
 \.idea/
 
 src/SimNDT/engine/EFIT2Dcython (Case Conflict).c
+
+# Virtual environments
+.venv*/
+venv/
+env/
+
+# Compiled Cython extensions
+*.pyd
+*.so
+
+# Generated outputs
+*.png

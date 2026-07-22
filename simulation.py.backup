@@ -8,16 +8,8 @@ Copyright (c) 2013 MMolero. All rights reserved.
 """
 
 import numpy as np
-from scipy.ndimage import zoom as _zoom
-from scipy.ndimage import rotate as _rotate
-
-def imresize(arr, scale, interp='nearest'):
-    order = 0 if interp == 'nearest' else 1
-    return _zoom(arr, scale, order=order).astype(arr.dtype)
-
-def imrotate(arr, angle, interp='nearest'):
-    order = 0 if interp == 'nearest' else 1
-    return _rotate(arr, angle, order=order, reshape=True).astype(arr.dtype)
+from scipy.misc import imresize
+from scipy.misc import imrotate
 
 from SimNDT.core.material import Material
 

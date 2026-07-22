@@ -13,7 +13,8 @@ from SimNDT.gui.Warnings import WarningParms
 from SimNDT.gui.constants import *
 
 import numpy as np
-from scipy.misc  import imread, imrotate
+from imageio import imread
+from scipy.ndimage import rotate as imrotate
 from scipy.ndimage.filters import median_filter
 
 
