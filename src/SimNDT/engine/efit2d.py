@@ -319,8 +319,9 @@ class EFIT2D(EngineBase):
 
     def receiverSetup(self):
         TimeSteps = int(self.simPack.Simulation.TimeSteps)
-        N_IR = np.size(self.simPack.Inspection.IR, 1)
-        self.receiver_signals = np.zeros((TimeSteps, N_IR - 1), dtype=np.float32)
+        # For FMC: single transmitter × multiple receivers
+        N_RX = np.size(self.simPack.Inspection.IR, 0)  # Number of receiver positions
+        self.receiver_signals = np.zeros((TimeSteps, N_RX), dtype=np.float32)
 
     def receivers(self, Var, Var_buf):
 

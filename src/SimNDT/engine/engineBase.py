@@ -46,6 +46,7 @@ class EngineBase(object):
 		self.sourceSetup()
 		self.receiverSetup()
 		self.simSetup()
+		self.setup_CL()
 		
 		
 	def setup_CL(self):

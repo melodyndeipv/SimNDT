@@ -1,10 +1,11 @@
 """
-5 MHz 32-element linear array simulation in steel (metal).
+5 MHz 32-element linear array FMC (Full Matrix Capture) simulation in steel.
 
-Inspection mode: PulseEcho LinearScan (each element fires & receives).
+Inspection mode: Full Aperture Receive (1 TX at center × 32 RX = 32 channels per time step).
 Material:        Steel  (VL=5850 m/s, VT=3220 m/s, rho=7800 kg/m3)
 Signal:          Raised-Cosine pulse @ 5 MHz
-Array geometry:  32 elements x 0.6 mm pitch = 19.2 mm aperture
+Array geometry:  32 elements x 0.585 mm pitch = 18.72 mm aperture
+Output:          FMC data array: (TimeSteps, 32) = (TimeSteps, 1_TX × 32_RX)
 """
 
 import sys
@@ -25,8 +26,14 @@ from SimNDT.core.constants      import BC
 from SimNDT.core.transducer     import Transducer
 from SimNDT.core.signal         import Signals
 from SimNDT.core.simulation     import Simulation
-from SimNDT.core.inspectionMethods import LinearScan
+from SimNDT.core.inspectionMethods import FMC
 from SimNDT.core.simPack        import SimPack
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONFIGURATION: CPU vs GPU execution
+# ─────────────────────────────────────────────────────────────────────────────
+USE_GPU = False    # Set to True for OpenCL GPU execution, False for CPU
+PLATFORM = "OpenCL" if USE_GPU else "CPU"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1.  MATERIAL  –  Steel
@@ -63,7 +70,7 @@ ABS_SIZE = 10   # absorbing layer thickness in pixels (= 1 mm at 10 px/mm)
 
 boundaries = [
     Boundary(name="Top",    BC=BC.AbsorbingLayer, size=ABS_SIZE),
-    Boundary(name="Bottom", BC=BC.AbsorbingLayer, size=ABS_SIZE),
+    Boundary(name="Bottom", BC=BC.AbsorbingLayer, size=0),
     Boundary(name="Left",   BC=BC.AbsorbingLayer, size=ABS_SIZE),
     Boundary(name="Right",  BC=BC.AbsorbingLayer, size=ABS_SIZE),
 ]
@@ -77,7 +84,7 @@ FREQ_HZ     = FREQ_MHZ * 1e6           # Hz  (5e6)
 WAVELENGTH_MM = (VL / FREQ_HZ) * 1e3  # wavelength in mm  (~1.17 mm)
 ELEM_SIZE   = WAVELENGTH_MM / 2.0      # half-wavelength element in mm  (~0.585 mm)
 N_ELEMENTS  = 32
-PITCH       = ELEM_SIZE                # pitch = element size, no gap (mm)
+PITCH       = ELEM_SIZE + 0.1               # pitch = element size, no gap (mm)
 HALF_SPAN   = (N_ELEMENTS - 1) * PITCH / 2.0   # half aperture in mm  (~9.3 mm)
 
 transducer = Transducer(
@@ -128,22 +135,29 @@ simulation.create_numericalModel(scenario)
 print(f"Numerical model size : {simulation.MRI} × {simulation.NRI} grid points")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 7.  LINEAR SCAN INSPECTION  –  sweep all 32 element positions
+# 7.  FMC INSPECTION  –  Full Aperture Receive (single TX center, all RX)
 # ─────────────────────────────────────────────────────────────────────────────
-inspection = LinearScan(
+inspection = FMC(
     ini      = -HALF_SPAN,          # start offset from centre (mm)
     end      =  HALF_SPAN,          # end offset from centre (mm)
     step     =  PITCH,              # step = one pitch (mm)
     Location = "Top",
-    Method   = "PulseEcho",
-    Theta    = [270.0*pi/180.0, 270.0*pi/180.0],   # normal incidence, top
 )
 
-print(f"\nLinear scan positions : {len(inspection.ScanVector)} steps")
-print(f"  from {inspection.ScanVector[0]:.3f} mm  to  {inspection.ScanVector[-1]:.3f} mm")
+print(f"\nInspection mode    : {inspection.Name}")
+print(f"Transmitter        : 1 element at center")
+print(f"Receivers          : {len(inspection.ScanVector)} elements (full aperture)")
 
-# Set up inspection geometry (populates XL, YL, etc.)
+# Set up inspection geometry (populates XL, YL, IR arrays)
 inspection.setInspection(scenario, transducer, simulation)
+
+# Debug: check actual sizes
+print(f"  XL shape (Transmitter): {inspection.XL.shape}")
+print(f"  YL shape: {inspection.YL.shape}")
+print(f"  IR shape (All Receivers): {inspection.IR.shape}")
+N_RX = inspection.IR.shape[0]
+print(f"  → FMC receive aperture: {N_RX} channels")
+print(f"  → receiver_signals shape will be: (TimeSteps, {N_RX})")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 8.  PACK EVERYTHING into SimPack
@@ -172,15 +186,16 @@ simpack = SimPack(
 fig, ax = plt.subplots(figsize=(8, 6))
 
 # show the scenario image (steel block)
-extent = [0, WIDTH_MM, HEIGHT_MM, 0]
-ax.imshow(scenario.Iabs, extent=extent, cmap="gray", vmin=0, vmax=2, aspect="equal")
+# Flip extent so y=0 is at top, y=30 is below
+extent = [-WIDTH_MM/2, WIDTH_MM/2, 0, HEIGHT_MM]
+ax.imshow(scenario.Iabs, extent=extent, cmap="gray", vmin=0, vmax=2, aspect="equal", origin="upper")
 
-# overlay the array elements on the top surface
+# overlay the array elements on the top surface (y=0)
 for pos in inspection.ScanVector:
-    x_left  = WIDTH_MM/2 + pos - ELEM_SIZE/2
-    x_right = WIDTH_MM/2 + pos + ELEM_SIZE/2
-    ax.add_patch(plt.Rectangle((x_left, 0), ELEM_SIZE, 1.0,
-                               color="red", alpha=0.8))
+    x_left  = pos - ELEM_SIZE/2
+    x_right = pos + ELEM_SIZE/2
+    ax.add_patch(plt.Rectangle((x_left, 0), ELEM_SIZE, 0.5,
+                               color="red", alpha=0.9, edgecolor="darkred", linewidth=1))
 
 ax.set_xlabel("x (mm)")
 ax.set_ylabel("depth (mm)")
@@ -188,7 +203,6 @@ ax.set_title(f"5 MHz {N_ELEMENTS}-element array on steel\n"
              f"Element pitch = {PITCH*1e3:.2f} mm, "
              f"dx = {simulation.dx*1e3:.3f} mm, "
              f"dt = {simulation.dt*1e9:.3f} ns")
-ax.invert_yaxis()
 plt.tight_layout()
 plt.savefig("array_scenario.png", dpi=150)
 plt.show()
@@ -198,20 +212,37 @@ print("\nSimPack ready. scenario, inspection, simulation, signal all configured.
 ## Run simulation
 from SimNDT.engine.efit2d import EFIT2D
 
-engine = EFIT2D(simpack, Platform="OpenCL")   # GPU with OpenCL
+engine = EFIT2D(simpack, Platform=PLATFORM)
 
-print(f"Running {simulation.TimeSteps} time steps on GPU...")
-print("(OpenCL kernel execution - this is much faster than CPU)")
+print(f"\nRunning {simulation.TimeSteps} time steps on {PLATFORM}...")
+if USE_GPU:
+    print("(OpenCL GPU kernel execution - faster)")
+    exec_func = engine.run
+else:
+    print("(CPU Cython serial execution)")
+    exec_func = engine.runSerial
 
-# For GPU: use engine.run() which executes the full simulation
-# The loop is handled internally by the OpenCL kernel
+# Execution loop
 for step in range(simulation.TimeSteps):
-    engine.run()
+    exec_func()
     engine.n += 1
-    if engine.n % 500 == 0:
+    if engine.n % 100 == 0:
         print(f"  step {engine.n}/{simulation.TimeSteps}")
+
+if USE_GPU:
+    engine.saveOutput()  # Copy GPU results back to CPU memory
 
 print("Simulation complete.")
 
-np.save("receiver_signals.npy", engine.receiver_signals)
-print(f"Receiver signals saved: {engine.receiver_signals.shape}")
+# Retrieve and save FMC data
+fmc_data = engine.receiver_signals
+
+print(f"\nFull Aperture Receive (FMC) Complete:")
+print(f"  Data shape: {fmc_data.shape}")
+print(f"  Time steps: {fmc_data.shape[0]}")
+print(f"  RX channels: {fmc_data.shape[1]} (full aperture receive)")
+print(f"  Transmitter: 1 element at center")
+print(f"  Each column represents one receive element over time")
+
+np.save("fmc_data.npy", fmc_data)
+print(f"\nFMC data saved to: fmc_data.npy")

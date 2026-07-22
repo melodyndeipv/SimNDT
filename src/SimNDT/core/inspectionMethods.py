@@ -254,6 +254,80 @@ class Tomography:
 	
 	def getReceivers(self, T):
 		return Inspection.getReceivers(self.XL, self.YL, self.IR, T, False)
+
+
+class FMC(SingleLaunch):
+	"""
+	Full Matrix Capture (FMC) inspection method.
+	Single transmitter at center, all array elements as receivers.
+	Captures full aperture receive data for advanced beamforming.
+	"""
+
+	def __init__(self, ini=-10, end=10, step=1, Location="Top"):
+		self.Name = "FMC"
+		self.Location = Location
+		Num = np.size(np.arange(ini, end, step))
+		self.ScanVector = np.linspace(ini, end, Num+1, endpoint=True)
+		self.ScanVectorString = "(%g,%g,%g)" % (ini, end, step)
+		self.Method = "Transmission"  # TX at center, RX at all positions
+		self.Theta = [270.0*pi/180.0, 90.0*pi/180.0]  # Top-facing TX and RX
+
+	def setInspection(self, Scenario, Transducer, Simulation):
+		"""
+		Setup FMC inspection (single TX, all RX):
+		- Transmitter fires from array center (single position)
+		- All array elements listen as receivers
+		- Result: XL has shape (1, 2), IR has shape (N_RX, 2)
+		- Total channels: N_RX receivers × 1 transmitter
+		"""
+		MRI, NRI = Simulation.MRI, Simulation.NRI
+		TapGrid = Simulation.TapGrid
+		Rgrid = Simulation.Rgrid
+
+		# Transmitter Y position (top surface)
+		y_tx = (NRI - TapGrid[2] - TapGrid[3]) / 2.0 + TapGrid[2]
+
+		# Array center X position
+		x_center = np.around((MRI) / 2.0)
+
+		# Create transmitter array: single position at center (shape: 1×2)
+		XL = np.array([[x_center, x_center]], dtype=np.float32)
+		YL = np.array([[y_tx, y_tx]], dtype=np.float32)
+
+		# Create receiver array: one position per scan vector element (shape: N_RX×2)
+		IR_list = []
+		for pos_offset in self.ScanVector:
+			x_rx = x_center + pos_offset * Rgrid
+			IR_list.append([x_rx, y_tx])
+
+		IR = np.array(IR_list, dtype=np.float32)
+
+		self.XL = XL.copy()
+		self.YL = YL.copy()
+		self.IR = IR.copy()
+
+	def getReceivers(self, T):
+		"""
+		Extract receiver signals from field T using coordinate-based IR array.
+		For FMC: single transmitter at XL[0], all receivers at IR positions.
+		
+		T: Wavefield array (usually displacement or velocity)
+		Returns: Array of signals from all receivers (shape: N_RX,)
+		"""
+		signals = []
+		tx_x = int(np.round(self.XL[0, 0]))  # Transmitter X coordinate
+		tx_y = int(np.round(self.XL[0, 1]))  # Transmitter Y coordinate
+		
+		# Extract signal from each receiver position
+		for rx_idx in range(self.IR.shape[0]):
+			rx_x = int(np.round(self.IR[rx_idx, 0]))
+			rx_y = int(np.round(self.IR[rx_idx, 1]))
+			# Clamp to array bounds
+			rx_x = max(0, min(rx_x, T.shape[0] - 1))
+			rx_y = max(0, min(rx_y, T.shape[1] - 1))
+			signals.append(T[rx_x, rx_y])
+		
+		return np.array(signals, dtype=np.float32)
 		
 		
 		
