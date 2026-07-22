@@ -174,9 +174,6 @@ class LinearScan(SingleLaunch):
 		self.Method = Method
 		self.Theta  = Theta
 		
-
-		
-		
 		
 		
 class Tomography:

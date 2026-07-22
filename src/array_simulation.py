@@ -5,7 +5,7 @@ Inspection mode: Full Aperture Receive (1 TX at center × 32 RX = 32 channels pe
 Material:        Steel  (VL=5850 m/s, VT=3220 m/s, rho=7800 kg/m3)
 Signal:          Raised-Cosine pulse @ 5 MHz
 Array geometry:  32 elements x 0.585 mm pitch = 18.72 mm aperture
-Output:          FMC data array: (TimeSteps, 32) = (TimeSteps, 1_TX × 32_RX)
+Output:          FMC data array: (TX, RX, TimeSteps) = (N_TX, N_RX, TimeSteps)
 """
 
 import sys
@@ -57,8 +57,8 @@ materials = [water, steel]   # label 0 = background (not used here), label 1 = s
 # ─────────────────────────────────────────────────────────────────────────────
 # 2.  SCENARIO  –  40 mm wide × 30 mm deep, filled with steel
 # ─────────────────────────────────────────────────────────────────────────────
-WIDTH_MM  = 40      # mm
-HEIGHT_MM = 30      # mm
+WIDTH_MM  = 20      # mm
+HEIGHT_MM = 10      # mm
 PIXEL_MM  = 10      # pixels per mm  (geometric resolution of the model image)
 
 scenario = Scenario(Width=WIDTH_MM, Height=HEIGHT_MM, Pixel_mm=PIXEL_MM, Label=1)
@@ -66,7 +66,7 @@ scenario = Scenario(Width=WIDTH_MM, Height=HEIGHT_MM, Pixel_mm=PIXEL_MM, Label=1
 # ─────────────────────────────────────────────────────────────────────────────
 # 3.  ABSORBING BOUNDARIES  (10-pixel layer on every side)
 # ─────────────────────────────────────────────────────────────────────────────
-ABS_SIZE = 10   # absorbing layer thickness in pixels (= 1 mm at 10 px/mm)
+ABS_SIZE = 5   # absorbing layer thickness in pixels (= 1 mm at 10 px/mm)
 
 boundaries = [
     Boundary(name="Top",    BC=BC.AbsorbingLayer, size=ABS_SIZE),
@@ -83,7 +83,7 @@ FREQ_MHZ    = 5.0        # MHz
 FREQ_HZ     = FREQ_MHZ * 1e6           # Hz  (5e6)
 WAVELENGTH_MM = (VL / FREQ_HZ) * 1e3  # wavelength in mm  (~1.17 mm)
 ELEM_SIZE   = WAVELENGTH_MM / 2.0      # half-wavelength element in mm  (~0.585 mm)
-N_ELEMENTS  = 32
+N_ELEMENTS  = 4
 PITCH       = ELEM_SIZE + 0.1               # pitch = element size, no gap (mm)
 HALF_SPAN   = (N_ELEMENTS - 1) * PITCH / 2.0   # half aperture in mm  (~9.3 mm)
 
@@ -195,7 +195,7 @@ for pos in inspection.ScanVector:
     x_left  = pos - ELEM_SIZE/2
     x_right = pos + ELEM_SIZE/2
     ax.add_patch(plt.Rectangle((x_left, 0), ELEM_SIZE, 0.5,
-                               color="red", alpha=0.9, edgecolor="darkred", linewidth=1))
+                               color="red", alpha=0.9, linewidth=1))
 
 ax.set_xlabel("x (mm)")
 ax.set_ylabel("depth (mm)")
@@ -209,40 +209,89 @@ plt.show()
 
 print("\nSimPack ready. scenario, inspection, simulation, signal all configured.")
 
-## Run simulation
+# ─────────────────────────────────────────────────────────────────────────────
+# 10. FULL 32×32 FMC ACQUISITION  –  Loop through all transmitter positions
+# ─────────────────────────────────────────────────────────────────────────────
 from SimNDT.engine.efit2d import EFIT2D
 
-engine = EFIT2D(simpack, Platform=PLATFORM)
+N_TX = len(inspection.ScanVector)
+fmc_matrix = np.zeros((N_TX, N_TX, simulation.TimeSteps), dtype=np.float32)
 
-print(f"\nRunning {simulation.TimeSteps} time steps on {PLATFORM}...")
+print(f"\n=== FULL {N_TX}×{N_TX} FMC MATRIX ACQUISITION ===")
+print(f"Running {N_TX} transmitter positions × {N_TX} receiver channels = {N_TX*N_TX} total channels\n")
+
 if USE_GPU:
     print("(OpenCL GPU kernel execution - faster)")
-    exec_func = engine.run
+    exec_func_name = "run"
 else:
     print("(CPU Cython serial execution)")
-    exec_func = engine.runSerial
+    exec_func_name = "runSerial"
 
-# Execution loop
-for step in range(simulation.TimeSteps):
-    exec_func()
-    engine.n += 1
-    if engine.n % 100 == 0:
-        print(f"  step {engine.n}/{simulation.TimeSteps}")
+for tx_idx in range(N_TX):
+    tx_position = inspection.ScanVector[tx_idx]
+    
+    # Create inspection with TX at this position
+    inspection_tx = FMC(
+        ini      = -HALF_SPAN,
+        end      =  HALF_SPAN,
+        step     =  PITCH,
+        Location = "Top",
+    )
+    
+    # Manually configure this transmitter's geometry
+    MRI, NRI = simulation.MRI, simulation.NRI
+    TapGrid = simulation.TapGrid
+    Rgrid = simulation.Rgrid
+    
+    y_tx = (NRI - TapGrid[2] - TapGrid[3]) / 2.0 + TapGrid[2]
+    x_center = np.around((MRI) / 2.0)
+    x_tx = x_center + tx_position * Rgrid  # TX offset from center
+    
+    # Single transmitter at position tx_idx
+    inspection_tx.XL = np.array([[x_tx, x_tx]], dtype=np.float32)
+    inspection_tx.YL = np.array([[y_tx, y_tx]], dtype=np.float32)
+    
+    # All receivers
+    IR_list = []
+    for rx_offset in inspection.ScanVector:
+        x_rx = x_center + rx_offset * Rgrid
+        IR_list.append([x_rx, y_tx])
+    inspection_tx.IR = np.array(IR_list, dtype=np.float32)
+    
+    # Update SimPack with new inspection
+    simpack.Inspection = inspection_tx
+    
+    # Create engine for this transmitter
+    engine = EFIT2D(simpack, Platform=PLATFORM)
+    
+    # Get execution function
+    exec_func = getattr(engine, exec_func_name)
+    
+    print(f"  TX[{tx_idx:2d}] at {tx_position:+7.2f} mm: ", end="", flush=True)
+    
+    # Run simulation for this transmitter
+    for step in range(simulation.TimeSteps):
+        exec_func()
+        engine.n += 1
+    
+    if USE_GPU:
+        engine.saveOutput()  # Copy GPU results back to CPU
+    
+    # Store receiver signals for this transmitter
+    fmc_matrix[tx_idx, :, :] = engine.receiver_signals.T
+    print(f"✓ ({engine.receiver_signals.shape[0]} time steps, {engine.receiver_signals.shape[1]} RX)")
 
-if USE_GPU:
-    engine.saveOutput()  # Copy GPU results back to CPU memory
+print("\n=== FMC Acquisition Complete ===")
 
-print("Simulation complete.")
+print(f"\nFull Matrix Capture (FMC) Complete:")
+print(f"  Shape: {fmc_matrix.shape}")
+print(f"  Transmitters: {fmc_matrix.shape[0]}")
+print(f"  Receivers: {fmc_matrix.shape[1]}")
+print(f"  TimeSteps: {fmc_matrix.shape[2]}")
+print(f"  Total channels: {N_TX * N_TX} = {N_TX} TX × {N_TX} RX")
 
-# Retrieve and save FMC data
-fmc_data = engine.receiver_signals
-
-print(f"\nFull Aperture Receive (FMC) Complete:")
-print(f"  Data shape: {fmc_data.shape}")
-print(f"  Time steps: {fmc_data.shape[0]}")
-print(f"  RX channels: {fmc_data.shape[1]} (full aperture receive)")
-print(f"  Transmitter: 1 element at center")
-print(f"  Each column represents one receive element over time")
-
-np.save("fmc_data.npy", fmc_data)
+# Save in (TX, RX, TimeSteps) format
+np.save("fmc_data.npy", fmc_matrix)
 print(f"\nFMC data saved to: fmc_data.npy")
+print(f"  Load with: fmc = np.load('fmc_data.npy')")
+print(f"  Access signal: fmc[tx_idx, rx_idx, time_step]")
