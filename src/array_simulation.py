@@ -31,8 +31,38 @@ from SimNDT.core.simPack        import SimPack
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURATION: CPU vs GPU execution
+# Auto-detects the first OpenCL GPU; set USE_GPU = False to force CPU.
 # ─────────────────────────────────────────────────────────────────────────────
-USE_GPU = False    # Set to True for OpenCL GPU execution, False for CPU
+USE_GPU = True   # set to False to force CPU (Cython serial)
+
+GPU_PLATFORM_NAME = None
+GPU_DEVICE_TYPE   = None
+
+if USE_GPU:
+    try:
+        import pyopencl as _cl
+        _found = None
+        for _plat in _cl.get_platforms():
+            for _dev in _plat.get_devices():
+                _dtype = _cl.device_type.to_string(_dev.type)
+                if "GPU" in _dtype:
+                    _candidate = (_plat.name, _dtype, _dev.name)
+                    if _found is None:
+                        _found = _candidate          # take the first GPU found
+                    if "NVIDIA" in _plat.name.upper():
+                        _found = _candidate          # prefer NVIDIA if present
+                        break
+        if _found:
+            GPU_PLATFORM_NAME, GPU_DEVICE_TYPE, _gpu_name = _found
+            print(f"OpenCL GPU detected : {_gpu_name!r} on platform {GPU_PLATFORM_NAME!r}")
+            print(f"  device type string: {GPU_DEVICE_TYPE!r}")
+        else:
+            print("No OpenCL GPU found  — falling back to CPU serial")
+            USE_GPU = False
+    except ImportError:
+        print("pyopencl not installed — falling back to CPU serial")
+        USE_GPU = False
+
 PLATFORM = "OpenCL" if USE_GPU else "CPU"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -120,10 +150,13 @@ simulation = Simulation(
     PointCycle = 15,          # grid points per wavelength
     SimTime    = SIM_TIME_US * 1e-6,   # seconds
     Order      = 2,
-    Device     = "CPU",       # change to "GPU" if OpenCL GPU device available
 )
 
 simulation.job_parameters(materials, transducer)
+
+if USE_GPU:
+    simulation.setPlatform(GPU_PLATFORM_NAME)
+    simulation.setDevice(GPU_DEVICE_TYPE)
 
 print(f"\nNumerical grid step  dx = {simulation.dx*1e3:.4f} mm")
 print(f"Time step            dt = {simulation.dt*1e9:.4f} ns")
