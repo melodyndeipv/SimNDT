@@ -12,8 +12,8 @@ FREQ_MHZ   = 5.0             # MHz
 FREQ_HZ    = FREQ_MHZ * 1e6
 PointCycle = 15
 N_CYCLES   = 5               # GaussianSine burst cycles
-HEIGHT_MM  = 40.0            # mm  scenario depth
-WIDTH_MM   = 40.0            # mm  scenario width
+HEIGHT_MM  = 30.0            # mm  scenario depth
+WIDTH_MM   = 50.0            # mm  scenario width
 HOLE_X_MM  = WIDTH_MM / 2    # hole x  (mm from left edge → 0 mm in centred coords)
 HOLE_Z_MM  = HEIGHT_MM / 2   # hole depth (mm)
 
@@ -89,7 +89,7 @@ tfm_db  = 20.0 * np.log10(tfm_env / (tfm_env.max() + 1e-40) + 1e-12)
 print("TFM complete — plotting ...")
 
 # ─── Plot ─────────────────────────────────────────────────────────────────────
-DYNAMIC_DB = 30
+DYNAMIC_DB = 20
 extent = [-WIDTH_MM / 2 * 1.5, WIDTH_MM / 2 * 1.5, HEIGHT_MM * 1.5, 0]   # (left, right, bottom, top)
 
 fig, axes = plt.subplots(1, 2, figsize=(14, 6))

@@ -88,8 +88,8 @@ materials = [air, steel]     # label 0 = air/void, label 1 = steel
 # ─────────────────────────────────────────────────────────────────────────────
 # 2.  SCENARIO  –  40 mm wide × 30 mm deep, filled with steel
 # ─────────────────────────────────────────────────────────────────────────────
-WIDTH_MM  = 40      # mm
-HEIGHT_MM = 40      # mm
+WIDTH_MM  = 50      # mm
+HEIGHT_MM = 30      # mm
 PIXEL_MM  = 10      # pixels per mm  (geometric resolution of the model image)
 
 scenario = Scenario(Width=WIDTH_MM, Height=HEIGHT_MM, Pixel_mm=PIXEL_MM, Label=1)
