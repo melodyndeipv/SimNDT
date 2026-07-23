@@ -281,27 +281,41 @@ class FMC(SingleLaunch):
 		TapGrid = Simulation.TapGrid
 		Rgrid = Simulation.Rgrid
 
-		# Transmitter Y position (top surface)
-		y_tx = (NRI - TapGrid[2] - TapGrid[3]) / 2.0 + TapGrid[2]
+		# Excite at the physical top surface. Txx is only propagated from row 1,
+		# so receive one row inside the sample to capture returning wavefields.
+		tx_row = int(np.round(TapGrid[0]))
+		rx_row = tx_row + 1
 
-		# Array center X position
-		x_center = np.around((MRI) / 2.0)
+		# Horizontal centre column of the active model. Rgrid is expressed in
+		# grid nodes per scenario pixel, so convert millimetres through Pixel_mm.
+		y_center = (NRI - TapGrid[2] - TapGrid[3]) / 2.0 + TapGrid[2]
+		grid_per_mm = Scenario.Pixel_mm * Rgrid
+		nodes_per_element = max(1, int(np.round(Transducer.Size * grid_per_mm)))
 
-		# Create transmitter array: single position at center (shape: 1×2)
-		XL = np.array([[x_center, x_center]], dtype=np.float32)
-		YL = np.array([[y_tx, y_tx]], dtype=np.float32)
+		# The centre element excites every node across its physical aperture.
+		tx_start = int(np.round(y_center - nodes_per_element / 2.0))
+		tx_nodes = np.arange(tx_start, tx_start + nodes_per_element, dtype=np.float32)
+		XL = np.full((nodes_per_element, 2), tx_row, dtype=np.float32)
+		YL = np.column_stack((tx_nodes, tx_nodes)).astype(np.float32)
 
-		# Create receiver array: one position per scan vector element (shape: N_RX×2)
+		# Store every surface node for each receiver element. IR remains as
+		# element centres for compatibility with callers that inspect it.
+		element_nodes = []
 		IR_list = []
 		for pos_offset in self.ScanVector:
-			x_rx = x_center + pos_offset * Rgrid
-			IR_list.append([x_rx, y_tx])
+			y_rx = y_center + pos_offset * grid_per_mm
+			rx_start = int(np.round(y_rx - nodes_per_element / 2.0))
+			rx_nodes = np.arange(rx_start, rx_start + nodes_per_element, dtype=np.float32)
+			element_nodes.append(np.column_stack((
+				np.full(nodes_per_element, rx_row, dtype=np.float32), rx_nodes)))
+			IR_list.append([rx_row, y_rx])
 
 		IR = np.array(IR_list, dtype=np.float32)
 
 		self.XL = XL.copy()
 		self.YL = YL.copy()
 		self.IR = IR.copy()
+		self.ElementNodes = np.array(element_nodes, dtype=np.float32)
 
 	def getReceivers(self, T):
 		"""
@@ -315,13 +329,17 @@ class FMC(SingleLaunch):
 		tx_x = int(np.round(self.XL[0, 0]))  # Transmitter X coordinate
 		tx_y = int(np.round(self.XL[0, 1]))  # Transmitter Y coordinate
 		
-		# Extract signal from each receiver position
-		for rx_idx in range(self.IR.shape[0]):
-			rx_x = int(np.round(self.IR[rx_idx, 0]))
-			rx_y = int(np.round(self.IR[rx_idx, 1]))
-			# Clamp to array bounds
-			rx_x = max(0, min(rx_x, T.shape[0] - 1))
-			rx_y = max(0, min(rx_y, T.shape[1] - 1))
+		if hasattr(self, "ElementNodes"):
+			for element in self.ElementNodes:
+				rx_x = np.clip(np.round(element[:, 0]).astype(np.int32), 0, T.shape[0] - 1)
+				rx_y = np.clip(np.round(element[:, 1]).astype(np.int32), 0, T.shape[1] - 1)
+				signals.append(np.mean(T[rx_x, rx_y]))
+		else:
+			for rx_idx in range(self.IR.shape[0]):
+				rx_x = int(np.round(self.IR[rx_idx, 0]))
+				rx_y = int(np.round(self.IR[rx_idx, 1]))
+				rx_x = max(0, min(rx_x, T.shape[0] - 1))
+				rx_y = max(0, min(rx_y, T.shape[1] - 1))
 			signals.append(T[rx_x, rx_y])
 		
 		return np.array(signals, dtype=np.float32)

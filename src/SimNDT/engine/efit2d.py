@@ -306,12 +306,15 @@ class EFIT2D(EngineBase):
 
         if not self.simPack.Inspection.Name == "Tomography":
             self._Receiver = True
-            XL = self.simPack.Inspection.XL
-            YL = self.simPack.Inspection.YL
+            # One receive channel is the mean over all surface nodes of an element.
+            element_nodes = getattr(self.simPack.Inspection, "ElementNodes", None)
+            if element_nodes is None:
+                element_nodes = self.simPack.Inspection.IR[:, np.newaxis, :]
+            self.N_recv, self.N_recv_nodes, _ = element_nodes.shape
+            self.XXL = np.int32(np.round(element_nodes[:, :, 0]).ravel())
+            self.YYL = np.int32(np.round(element_nodes[:, :, 1]).ravel())
             self.receiver_buf = cl.Buffer(self.ctx, self.mf.WRITE_ONLY | self.mf.COPY_HOST_PTR,
                                           hostbuf=self.receiver_signals)
-            self.XXL = np.copy(np.int32(XL[:, 1]))
-            self.YYL = np.copy(np.int32(YL[:, 1]))
             self.XXL_buf = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=self.XXL)
             self.YYL_buf = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=self.YYL)
 
@@ -326,8 +329,9 @@ class EFIT2D(EngineBase):
     def receivers(self, Var, Var_buf):
 
         if self._Receiver:
-            self.program.Receiver_EFIT2D(self.queue, (self.NX,), None, self.Txx_buf, self.receiver_buf,
-                                         np.int32(self.n),
+            # Run one work-item per element and average its surface-node span.
+            self.program.Receiver_EFIT2D(self.queue, (self.N_recv,), None, self.Txx_buf, self.receiver_buf,
+                                         np.int32(self.n), np.int32(self.N_recv), np.int32(self.N_recv_nodes),
                                          self.XXL_buf, self.YYL_buf).wait()
         else:
             cl.enqueue_copy(self.queue, Var, Var_buf)
@@ -436,18 +440,17 @@ class EFIT2D(EngineBase):
         return macro + """
 
 
-			__kernel void Receiver_EFIT2D(__global float *Buffer, __global float *receiver, const int t,
-							              __global const int *XXL, __global const int *YYL){
+__kernel void Receiver_EFIT2D(__global float *Buffer, __global float *receiver,
+                                          const int t, const int N_recv, const int N_recv_nodes,
+			                              __global const int *XXL, __global const int *YYL){
 
-
-			  __private float _tmp = 0.0f;
-
-
-			   for (int i=0; i<get_global_size(0); ++i)
-		       {
-				 _tmp +=  Buffer[ind(XXL[i],YYL[i])];
-			   }
-			   receiver[t] = _tmp/(float)get_global_size(0);
+              int k = get_global_id(0);   /* receiver element index */
+              float sum = 0.0f;
+              for (int node = 0; node < N_recv_nodes; ++node) {
+                  int index = k * N_recv_nodes + node;
+                  sum += Buffer[ind(XXL[index], YYL[index])];
+              }
+              receiver[t * N_recv + k] = sum / (float)N_recv_nodes;
             }
 
 

@@ -28,6 +28,7 @@ from SimNDT.core.signal         import Signals
 from SimNDT.core.simulation     import Simulation
 from SimNDT.core.inspectionMethods import FMC
 from SimNDT.core.simPack        import SimPack
+from SimNDT.core.geometryObjects import Circle
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURATION: CPU vs GPU execution
@@ -78,33 +79,52 @@ c12  = rho * (VL**2 - 2*VT**2)     # ~  1.042e11 Pa
 c22  = c11
 
 steel = Material(name="steel", rho=rho, c11=c11, c12=c12, c22=c22, c44=c44, label=1)
-water = Material(name="water", rho=1000.0,
-                 c11=1000*1480**2, c12=1000*1480**2,
-                 c22=1000*1480**2, c44=1e-30, label=0)
+air   = Material(name="air",   rho=1.2,                 # rho < 2.0 → engine treats as vacuum
+                 c11=1e-20, c12=1e-20,
+                 c22=1e-20, c44=1e-20, label=0)
 
-materials = [water, steel]   # label 0 = background (not used here), label 1 = steel
+materials = [air, steel]     # label 0 = air/void, label 1 = steel
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2.  SCENARIO  –  40 mm wide × 30 mm deep, filled with steel
 # ─────────────────────────────────────────────────────────────────────────────
-WIDTH_MM  = 20      # mm
-HEIGHT_MM = 10      # mm
+WIDTH_MM  = 40      # mm
+HEIGHT_MM = 40      # mm
 PIXEL_MM  = 10      # pixels per mm  (geometric resolution of the model image)
 
 scenario = Scenario(Width=WIDTH_MM, Height=HEIGHT_MM, Pixel_mm=PIXEL_MM, Label=1)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3.  ABSORBING BOUNDARIES  (10-pixel layer on every side)
+# 3.  ABSORBING BOUNDARIES
+# Boundary size is in mm (multiplied by Pixel_mm internally).
+# 5 mm absorbing layer on all sides except the bottom (keep as reflective backwall).
 # ─────────────────────────────────────────────────────────────────────────────
-ABS_SIZE = 5   # absorbing layer thickness in pixels (= 1 mm at 10 px/mm)
+ABS_SIZE = 0   # absorbing layer thickness in mm
 
 boundaries = [
     Boundary(name="Top",    BC=BC.AbsorbingLayer, size=ABS_SIZE),
-    Boundary(name="Bottom", BC=BC.AbsorbingLayer, size=0),
+    Boundary(name="Bottom", BC=BC.AbsorbingLayer, size=ABS_SIZE),        # 0 = reflective backwall
     Boundary(name="Left",   BC=BC.AbsorbingLayer, size=ABS_SIZE),
     Boundary(name="Right",  BC=BC.AbsorbingLayer, size=ABS_SIZE),
 ]
 scenario.createBoundaries(boundaries)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3b. DEFECT  –  1 mm diameter side-drilled hole at mid-depth, centre
+# ─────────────────────────────────────────────────────────────────────────────
+# Coordinates are in mm from the top-left corner of the scenario image.
+# x0 = WIDTH_MM/2  → horizontal centre
+# y0 = HEIGHT_MM/2 → mid-depth (5 mm)
+# Label=0 → void (background/water material) inside steel = strong reflector
+HOLE_X_MM = WIDTH_MM / 2        # mm from left edge
+HOLE_Y_MM = HEIGHT_MM / 2       # mm from top surface
+HOLE_D_MM = 5.0                 # hole diameter (mm)
+
+hole = Circle(x0=HOLE_X_MM, y0=HOLE_Y_MM, r=HOLE_D_MM/2, Label=0)
+scenario.addObject(hole)
+
+print(f"Hole added : {HOLE_D_MM:.1f} mm diameter at "
+      f"x={HOLE_X_MM:.1f} mm, depth={HOLE_Y_MM:.1f} mm")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 4.  ARRAY TRANSDUCER  –  32 elements, 0.6 mm pitch → 19.2 mm aperture
@@ -113,7 +133,7 @@ FREQ_MHZ    = 5.0        # MHz
 FREQ_HZ     = FREQ_MHZ * 1e6           # Hz  (5e6)
 WAVELENGTH_MM = (VL / FREQ_HZ) * 1e3  # wavelength in mm  (~1.17 mm)
 ELEM_SIZE   = WAVELENGTH_MM / 2.0      # half-wavelength element in mm  (~0.585 mm)
-N_ELEMENTS  = 4
+N_ELEMENTS  = 32
 PITCH       = ELEM_SIZE + 0.1               # pitch = element size, no gap (mm)
 HALF_SPAN   = (N_ELEMENTS - 1) * PITCH / 2.0   # half aperture in mm  (~9.3 mm)
 
@@ -127,20 +147,20 @@ transducer = Transducer(
 )
 
 print(f"Element size  : {ELEM_SIZE:.2f} mm")
-print(f"Total aperture: {N_ELEMENTS*PITCH:.2f} mm  ({N_ELEMENTS} × {PITCH:.3f} mm)")
-print(f"Scan span     : {-HALF_SPAN:.2f} mm  →  {+HALF_SPAN:.2f} mm")
+print(f"Total aperture: {N_ELEMENTS*PITCH:.2f} mm  ({N_ELEMENTS} x {PITCH:.3f} mm)")
+print(f"Scan span     : {-HALF_SPAN:.2f} mm to {+HALF_SPAN:.2f} mm")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 5.  EXCITATION SIGNAL  –  Raised-Cosine @ 5 MHz
 # ─────────────────────────────────────────────────────────────────────────────
-signal = Signals(Name="RaisedCosine", Amplitud=1.0,
+signal = Signals(Name="GaussianSine", Amplitud=1.0,
                  Frequency=FREQ_MHZ * 1e6,   # Hz
-                 N_Cycles=2)
+                 N_Cycles=5)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 6.  SIMULATION PARAMETERS
 # ─────────────────────────────────────────────────────────────────────────────
-# SimTime: round-trip in HEIGHT_MM of steel + 20 % margin
+# SimTime: round-trip in HEIGHT_MM of steel + 200 % margin
 ROUND_TRIP_US = 2.0 * HEIGHT_MM * 1e-3 / VL * 1e6   # µs
 SIM_TIME_US   = ROUND_TRIP_US * 1.2
 
@@ -168,6 +188,48 @@ simulation.create_numericalModel(scenario)
 print(f"Numerical model size : {simulation.MRI} × {simulation.NRI} grid points")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 6b. CHECK TRANSDUCER PLACEMENT RELATIVE TO BOUNDARIES
+# ─────────────────────────────────────────────────────────────────────────────
+print(f"\n=== TRANSDUCER PLACEMENT ANALYSIS ===")
+print(f"Sample dimensions (mm):")
+print(f"  Width:  ±{WIDTH_MM/2:.1f} mm  (from {-WIDTH_MM/2:.1f} to {WIDTH_MM/2:.1f} mm)")
+print(f"  Height: 0 to {HEIGHT_MM:.1f} mm (surface to depth)")
+
+print(f"\nTransducer element positions (mm):")
+print(f"  Leftmost element:  {-HALF_SPAN:.3f} mm")
+print(f"  Rightmost element: {+HALF_SPAN:.3f} mm")
+print(f"  Scan span width:   {2*HALF_SPAN:.3f} mm")
+print(f"  Sample width:      {WIDTH_MM:.3f} mm")
+
+print(f"\nBoundary configuration (grid points):")
+print(f"  TapGrid[0] (top):   {simulation.TapGrid[0]}")
+print(f"  TapGrid[1] (bot):   {simulation.TapGrid[1]}")
+print(f"  TapGrid[2] (left):  {simulation.TapGrid[2]}")
+print(f"  TapGrid[3] (right): {simulation.TapGrid[3]}")
+
+print(f"\nGrid resolution:")
+print(f"  Rgrid (mm/grid):    {simulation.Rgrid:.6f} mm/point")
+print(f"  dx (m):             {simulation.dx:.6e} m")
+
+print(f"\nTransducer placement check:")
+if abs(HALF_SPAN) < WIDTH_MM / 2:
+    print(f"  [OK] Elements are INSIDE the sample (not on boundary)")
+    margin_left = WIDTH_MM/2 - HALF_SPAN
+    margin_right = WIDTH_MM/2 - HALF_SPAN
+    print(f"    Left margin:  {margin_left:.3f} mm from edge")
+    print(f"    Right margin: {margin_right:.3f} mm from edge")
+else:
+    print(f"  [WARNING] Elements may be ON or OUTSIDE the sample boundary!")
+
+# Check if elements are on the top surface (y=0)
+print(f"\nVertical placement:")
+print(f"  Transducer location: Top surface (y=0)")
+print(f"  Excitation row (grid): TapGrid[0] = {int(np.round(simulation.TapGrid[0]))}")
+print(f"    This is the physical top boundary (y=0)")
+print(f"  Receive row (grid):    TapGrid[0]+1 = {int(np.round(simulation.TapGrid[0]))+1}")
+print(f"    This captures propagated Txx one grid point inside the sample")
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 7.  FMC INSPECTION  –  Full Aperture Receive (single TX center, all RX)
 # ─────────────────────────────────────────────────────────────────────────────
 inspection = FMC(
@@ -176,6 +238,8 @@ inspection = FMC(
     step     =  PITCH,              # step = one pitch (mm)
     Location = "Top",
 )
+# np.arange floating-point rounding can add one spurious step → clamp to exactly N_ELEMENTS
+inspection.ScanVector = np.linspace(-HALF_SPAN, HALF_SPAN, N_ELEMENTS)
 
 print(f"\nInspection mode    : {inspection.Name}")
 print(f"Transmitter        : 1 element at center")
@@ -189,8 +253,8 @@ print(f"  XL shape (Transmitter): {inspection.XL.shape}")
 print(f"  YL shape: {inspection.YL.shape}")
 print(f"  IR shape (All Receivers): {inspection.IR.shape}")
 N_RX = inspection.IR.shape[0]
-print(f"  → FMC receive aperture: {N_RX} channels")
-print(f"  → receiver_signals shape will be: (TimeSteps, {N_RX})")
+print(f"  FMC receive aperture: {N_RX} channels")
+print(f"  receiver_signals shape will be: (TimeSteps, {N_RX})")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 8.  PACK EVERYTHING into SimPack
@@ -219,23 +283,29 @@ simpack = SimPack(
 fig, ax = plt.subplots(figsize=(8, 6))
 
 # show the scenario image (steel block)
-# Flip extent so y=0 is at top, y=30 is below
-extent = [-WIDTH_MM/2, WIDTH_MM/2, 0, HEIGHT_MM]
-ax.imshow(scenario.Iabs, extent=extent, cmap="gray", vmin=0, vmax=2, aspect="equal", origin="upper")
+# y=0 is at top (surface), depth increases downward
+extent = [-WIDTH_MM/2, WIDTH_MM/2, HEIGHT_MM, 0]
+ax.imshow(scenario.Iabs, extent=extent, cmap="gray", vmin=0, vmax=2, aspect="equal", origin="lower")
+
+# Draw sample boundary (white dashed lines)
+ax.axvline(x=-WIDTH_MM/2, color="white", linestyle="--", linewidth=1.5, label="Sample edges")
+ax.axvline(x=+WIDTH_MM/2, color="white", linestyle="--", linewidth=1.5)
+ax.axhline(y=0, color="white", linestyle="--", linewidth=1.5)
 
 # overlay the array elements on the top surface (y=0)
 for pos in inspection.ScanVector:
     x_left  = pos - ELEM_SIZE/2
     x_right = pos + ELEM_SIZE/2
     ax.add_patch(plt.Rectangle((x_left, 0), ELEM_SIZE, 0.5,
-                               color="red", alpha=0.9, linewidth=1))
+                               color="red", alpha=0.9, linewidth=1, label="TX/RX elements" if pos == inspection.ScanVector[0] else ""))
 
 ax.set_xlabel("x (mm)")
 ax.set_ylabel("depth (mm)")
 ax.set_title(f"5 MHz {N_ELEMENTS}-element array on steel\n"
-             f"Element pitch = {PITCH*1e3:.2f} mm, "
+             f"Element pitch = {PITCH:.2f} mm, "
              f"dx = {simulation.dx*1e3:.3f} mm, "
              f"dt = {simulation.dt*1e9:.3f} ns")
+ax.legend(loc="upper right")
 plt.tight_layout()
 plt.savefig("array_scenario.png", dpi=150)
 plt.show()
@@ -276,20 +346,33 @@ for tx_idx in range(N_TX):
     TapGrid = simulation.TapGrid
     Rgrid = simulation.Rgrid
     
-    y_tx = (NRI - TapGrid[2] - TapGrid[3]) / 2.0 + TapGrid[2]
-    x_center = np.around((MRI) / 2.0)
-    x_tx = x_center + tx_position * Rgrid  # TX offset from center
-    
-    # Single transmitter at position tx_idx
-    inspection_tx.XL = np.array([[x_tx, x_tx]], dtype=np.float32)
-    inspection_tx.YL = np.array([[y_tx, y_tx]], dtype=np.float32)
-    
-    # All receivers
+    # Excite at y=0; sample returning stress at the first propagated row.
+    tx_row   = int(np.round(TapGrid[0]))
+    rx_row   = tx_row + 1
+    y_center = (NRI - TapGrid[2] - TapGrid[3]) / 2.0 + TapGrid[2]   # horizontal centre col
+    grid_per_mm = PIXEL_MM * Rgrid
+    nodes_per_element = max(1, int(np.round(ELEM_SIZE * grid_per_mm)))
+    y_tx = y_center + tx_position * grid_per_mm
+
+    # Excite every top-surface grid node covered by the transmit element.
+    tx_start = int(np.round(y_tx - nodes_per_element / 2.0))
+    tx_nodes = np.arange(tx_start, tx_start + nodes_per_element, dtype=np.float32)
+    inspection_tx.XL = np.full((nodes_per_element, 2), tx_row, dtype=np.float32)
+    inspection_tx.YL = np.column_stack((tx_nodes, tx_nodes)).astype(np.float32)
+
+    # Record every top-surface node for each receiver element; the engine
+    # averages each node span into one FMC receive channel.
+    element_nodes = []
     IR_list = []
     for rx_offset in inspection.ScanVector:
-        x_rx = x_center + rx_offset * Rgrid
-        IR_list.append([x_rx, y_tx])
+        y_rx = y_center + rx_offset * grid_per_mm
+        rx_start = int(np.round(y_rx - nodes_per_element / 2.0))
+        rx_nodes = np.arange(rx_start, rx_start + nodes_per_element, dtype=np.float32)
+        element_nodes.append(np.column_stack((
+            np.full(nodes_per_element, rx_row, dtype=np.float32), rx_nodes)))
+        IR_list.append([rx_row, y_rx])
     inspection_tx.IR = np.array(IR_list, dtype=np.float32)
+    inspection_tx.ElementNodes = np.array(element_nodes, dtype=np.float32)
     
     # Update SimPack with new inspection
     simpack.Inspection = inspection_tx
