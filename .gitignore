@@ -21,3 +21,5 @@ env/
 
 # FMC data
 *.npy
+
+*.csv
