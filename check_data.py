@@ -30,8 +30,8 @@ PITCH_MM = ELEM_SIZE_MM + 0.1
 HALF_SPAN = (N_ELEMENTS - 1) * PITCH_MM / 2.0
 
 # ─── Load generated FMC data and defect metadata ─────────────────────────────
-FMC_PATH = Path("fmc_dataset_test/fmc_00000.npy")
-METADATA_PATH = FMC_PATH.parent / "metadata.csv"
+FMC_PATH = Path("fmc_dataset/fmc_00251.npy")
+METADATA_PATH = Path("fmc_dataset/metadata.csv")
 
 with METADATA_PATH.open(newline="", encoding="ascii") as metadata_file:
     metadata = next(

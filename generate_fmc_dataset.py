@@ -32,6 +32,7 @@ def parse_args():
     parser.add_argument("--count", type=int, default=1000)
     parser.add_argument("--start-index", type=int, default=0)
     parser.add_argument("--seed", type=int, default=20260723)
+    parser.add_argument("--defect-count", type=int, default=2)
     parser.add_argument("--min-diameter-mm", type=float, default=1.5)
     parser.add_argument("--max-diameter-mm", type=float, default=5.0)
     parser.add_argument("--min-depth-mm", type=float, default=7.0)
@@ -43,6 +44,8 @@ def parse_args():
 def validate_args(args):
     if args.count < 0 or args.start_index < 0:
         raise ValueError("count and start-index must be non-negative")
+    if args.defect_count < 1:
+        raise ValueError("defect-count must be at least 1")
     if not 0 < args.min_diameter_mm <= args.max_diameter_mm:
         raise ValueError("diameter bounds must be positive and ordered")
     if not 0 < args.min_depth_mm <= args.max_depth_mm < HEIGHT_MM:
@@ -78,7 +81,7 @@ def append_metadata(metadata_path, row):
         writer.writerow(row)
 
 
-def run_sample(repo_root, simulator_path, output_path, defect):
+def run_sample(repo_root, simulator_path, output_path, defects):
     temporary_output = output_path.with_suffix(".tmp.npy")
     environment = os.environ.copy()
     environment.update(
@@ -86,11 +89,17 @@ def run_sample(repo_root, simulator_path, output_path, defect):
             "SIMNDT_REQUIRE_GPU": "1",
             "SIMNDT_SHOW_PLOTS": "0",
             "SIMNDT_FMC_OUTPUT": str(temporary_output.resolve()),
-            "SIMNDT_HOLE_X_MM": f"{defect['x_mm']:.8f}",
-            "SIMNDT_HOLE_Y_MM": f"{defect['depth_mm']:.8f}",
-            "SIMNDT_HOLE_D_MM": f"{defect['diameter_mm']:.8f}",
+            "SIMNDT_HOLE_COUNT": str(len(defects)),
         }
     )
+    for defect_index, defect in enumerate(defects, start=1):
+        environment.update(
+            {
+                f"SIMNDT_HOLE_{defect_index}_X_MM": f"{defect['x_mm']:.8f}",
+                f"SIMNDT_HOLE_{defect_index}_Y_MM": f"{defect['depth_mm']:.8f}",
+                f"SIMNDT_HOLE_{defect_index}_D_MM": f"{defect['diameter_mm']:.8f}",
+            }
+        )
 
     try:
         completed = subprocess.run(
@@ -125,6 +134,7 @@ def main():
 
     print(f"Output directory: {output_dir}")
     print(f"Generating {args.count} FMC files starting at index {args.start_index}")
+    print(f"Defects per sample: {args.defect_count}")
     print(
         "Defects: diameter %.1f-%.1f mm; centered x +/-%.1f mm; depth %.1f-%.1f mm"
         % (
@@ -139,33 +149,35 @@ def main():
     completed_count = 0
     for sample_index in range(args.start_index, args.start_index + args.count):
         output_path = output_dir / f"fmc_{sample_index:05d}.npy"
-        defect = sample_defect(np.random.default_rng(args.seed + sample_index), args)
+        rng = np.random.default_rng(args.seed + sample_index)
+        defects = [sample_defect(rng, args) for _ in range(args.defect_count)]
         if output_path.exists():
             print(f"[{sample_index:05d}] exists, skipping")
             continue
 
-        print(
-            "[%05d] x=%+.2f mm, depth=%.2f mm, diameter=%.2f mm"
+        defect_details = "; ".join(
+            "hole %d: x=%+.2f mm, depth=%.2f mm, diameter=%.2f mm"
             % (
-                sample_index,
+                defect_index,
                 defect["x_centered_mm"],
                 defect["depth_mm"],
                 defect["diameter_mm"],
-            ),
-            flush=True,
+            )
+            for defect_index, defect in enumerate(defects, start=1)
         )
-        run_sample(repo_root, simulator_path, output_path, defect)
-        append_metadata(
-            metadata_path,
-            {
-                "sample_id": sample_index,
-                "fmc_file": output_path.name,
-                "x_mm_from_left": f"{defect['x_mm']:.8f}",
-                "x_mm_centered": f"{defect['x_centered_mm']:.8f}",
-                "depth_mm": f"{defect['depth_mm']:.8f}",
-                "diameter_mm": f"{defect['diameter_mm']:.8f}",
-            },
-        )
+        print(f"[{sample_index:05d}] {defect_details}", flush=True)
+        run_sample(repo_root, simulator_path, output_path, defects)
+        metadata = {"sample_id": sample_index, "fmc_file": output_path.name}
+        for defect_index, defect in enumerate(defects, start=1):
+            metadata.update(
+                {
+                    f"hole_{defect_index}_x_mm_from_left": f"{defect['x_mm']:.8f}",
+                    f"hole_{defect_index}_x_mm_centered": f"{defect['x_centered_mm']:.8f}",
+                    f"hole_{defect_index}_depth_mm": f"{defect['depth_mm']:.8f}",
+                    f"hole_{defect_index}_diameter_mm": f"{defect['diameter_mm']:.8f}",
+                }
+            )
+        append_metadata(metadata_path, metadata)
         completed_count += 1
 
     print(f"Completed {completed_count} new FMC files.")

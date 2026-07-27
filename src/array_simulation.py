@@ -136,17 +136,36 @@ scenario.createBoundaries(boundaries)
 # x0 = WIDTH_MM/2  → horizontal centre
 # y0 = HEIGHT_MM/2 → mid-depth (5 mm)
 # Label=0 → void (background/water material) inside steel = strong reflector
-HOLE_X_MM = float(os.environ.get("SIMNDT_HOLE_X_MM", WIDTH_MM / 2))
-HOLE_Y_MM = float(os.environ.get("SIMNDT_HOLE_Y_MM", HEIGHT_MM / 2))
-HOLE_D_MM = float(os.environ.get("SIMNDT_HOLE_D_MM", 5.0))
+HOLE_COUNT_VALUE = os.environ.get("SIMNDT_HOLE_COUNT")
+if HOLE_COUNT_VALUE is not None:
+    hole_count = int(HOLE_COUNT_VALUE)
+    if hole_count < 1:
+        raise ValueError("SIMNDT_HOLE_COUNT must be at least 1")
+    defects = []
+    for defect_index in range(1, hole_count + 1):
+        defects.append(
+            {
+                "x_mm": float(os.environ[f"SIMNDT_HOLE_{defect_index}_X_MM"]),
+                "y_mm": float(os.environ[f"SIMNDT_HOLE_{defect_index}_Y_MM"]),
+                "d_mm": float(os.environ[f"SIMNDT_HOLE_{defect_index}_D_MM"]),
+            }
+        )
+else:
+    defects = [
+        {
+            "x_mm": float(os.environ.get("SIMNDT_HOLE_X_MM", WIDTH_MM / 2)),
+            "y_mm": float(os.environ.get("SIMNDT_HOLE_Y_MM", HEIGHT_MM / 2)),
+            "d_mm": float(os.environ.get("SIMNDT_HOLE_D_MM", 5.0)),
+        }
+    ]
 
-hole = Circle(x0=HOLE_X_MM, y0=HOLE_Y_MM, r=HOLE_D_MM / 2, Label=0)
-scenario.addObject(hole)
-
-print(
-    f"Hole added : {HOLE_D_MM:.1f} mm diameter at "
-    f"x={HOLE_X_MM:.1f} mm, depth={HOLE_Y_MM:.1f} mm"
-)
+for defect_index, defect in enumerate(defects, start=1):
+    hole = Circle(x0=defect["x_mm"], y0=defect["y_mm"], r=defect["d_mm"] / 2, Label=0)
+    scenario.addObject(hole)
+    print(
+        f"Hole {defect_index} added: {defect['d_mm']:.1f} mm diameter at "
+        f"x={defect['x_mm']:.1f} mm, depth={defect['y_mm']:.1f} mm"
+    )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 4.  ARRAY TRANSDUCER  –  32 elements, 0.6 mm pitch → 19.2 mm aperture
