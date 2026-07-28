@@ -139,8 +139,8 @@ scenario.createBoundaries(boundaries)
 HOLE_COUNT_VALUE = os.environ.get("SIMNDT_HOLE_COUNT")
 if HOLE_COUNT_VALUE is not None:
     hole_count = int(HOLE_COUNT_VALUE)
-    if hole_count < 1:
-        raise ValueError("SIMNDT_HOLE_COUNT must be at least 1")
+    if hole_count < 0:
+        raise ValueError("SIMNDT_HOLE_COUNT must be non-negative")
     defects = []
     for defect_index in range(1, hole_count + 1):
         defects.append(

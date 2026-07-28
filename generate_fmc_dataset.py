@@ -44,8 +44,8 @@ def parse_args():
 def validate_args(args):
     if args.count < 0 or args.start_index < 0:
         raise ValueError("count and start-index must be non-negative")
-    if args.defect_count < 1:
-        raise ValueError("defect-count must be at least 1")
+    if args.defect_count < 0:
+        raise ValueError("defect-count must be non-negative")
     if not 0 < args.min_diameter_mm <= args.max_diameter_mm:
         raise ValueError("diameter bounds must be positive and ordered")
     if not 0 < args.min_depth_mm <= args.max_depth_mm < HEIGHT_MM:
@@ -73,10 +73,28 @@ def sample_defect(rng, args):
 
 
 def append_metadata(metadata_path, row):
-    write_header = not metadata_path.exists()
+    if metadata_path.exists():
+        with metadata_path.open(newline="", encoding="ascii") as metadata_file:
+            existing_rows = list(csv.DictReader(metadata_file))
+            existing_fields = list(existing_rows[0].keys()) if existing_rows else []
+        fieldnames = existing_fields + [
+            key for key in row if key not in existing_fields
+        ]
+        if fieldnames != existing_fields:
+            existing_rows.append({key: "" for key in fieldnames})
+            existing_rows[-1].update(row)
+            with metadata_path.open("w", newline="", encoding="ascii") as metadata_file:
+                writer = csv.DictWriter(metadata_file, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(existing_rows[:-1])
+                writer.writerow(existing_rows[-1])
+            return
+    else:
+        fieldnames = list(row.keys())
+
     with metadata_path.open("a", newline="", encoding="ascii") as metadata_file:
-        writer = csv.DictWriter(metadata_file, fieldnames=row.keys())
-        if write_header:
+        writer = csv.DictWriter(metadata_file, fieldnames=fieldnames)
+        if not metadata_path.exists() or metadata_path.stat().st_size == 0:
             writer.writeheader()
         writer.writerow(row)
 
