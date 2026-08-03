@@ -15,7 +15,7 @@ FREQ_MHZ = 5.0  # MHz
 FREQ_HZ = FREQ_MHZ * 1e6
 PointCycle = 15
 N_CYCLES = 5  # GaussianSine burst cycles
-HEIGHT_MM = 30.0  # mm  scenario depth
+HEIGHT_MM = 60  # mm  scenario depth
 WIDTH_MM = 50.0  # mm  scenario width
 
 # Derived grid parameters (same formulas as Simulation.job_parameters, Order=2)
@@ -30,17 +30,17 @@ PITCH_MM = ELEM_SIZE_MM + 0.1
 HALF_SPAN = (N_ELEMENTS - 1) * PITCH_MM / 2.0
 
 # ─── Load generated FMC data and defect metadata ─────────────────────────────
-FMC_PATH = Path("fmc_dataset/fmc_00251.npy")
-METADATA_PATH = Path("fmc_dataset/metadata.csv")
+FMC_PATH = Path("fmc60mm_dataset/fmc_00005.npy")
+METADATA_PATH = Path("fmc60mm_dataset/metadata.csv")
 
 with METADATA_PATH.open(newline="", encoding="ascii") as metadata_file:
     metadata = next(
         row for row in csv.DictReader(metadata_file) if row["fmc_file"] == FMC_PATH.name
     )
 
-HOLE_X_MM = float(metadata["x_mm_from_left"])
-HOLE_Z_MM = float(metadata["depth_mm"])
-HOLE_D_MM = float(metadata["diameter_mm"])
+HOLE_X_MM = float(metadata["hole_1_x_mm_from_left"])
+HOLE_Z_MM = float(metadata["hole_1_depth_mm"])
+HOLE_D_MM = float(metadata["hole_1_diameter_mm"])
 fmc = np.load(FMC_PATH)  # shape: (N_TX, N_RX, TimeSteps)
 N_TX, N_RX, TimeSteps = fmc.shape
 
@@ -91,7 +91,7 @@ for i in range(N_TX):
             )
             * 1e-3
         )  # m
-        t_grid = (d_tx + d_rx) / VL + PULSE_DELAY_S  # s
+        t_grid = (d_tx + d_rx) / VL + 1.7 * PULSE_DELAY_S  # s
 
         # ---- linear interpolation into A-scan --------------------------------
         t_idx = t_grid / dt  # float index
