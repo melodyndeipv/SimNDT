@@ -25,9 +25,9 @@ from SimNDT.engine.efit2d import EFIT2D
 VL_M_S = 5850.0
 VT_M_S = 3220.0
 RHO_KG_M3 = 7800.0
-FREQ_HZ = 5.0e6
+FREQ_HZ = 2.0e6
 WIDTH_MM = 50.0
-HEIGHT_MM = 60.0
+HEIGHT_MM = 30.0
 N_ELEMENTS = 32
 PIXEL_MM = 10.0
 POINT_CYCLE = 15
@@ -36,13 +36,14 @@ USE_GPU = True
 ELEMENT_SIZE_MM = (VL_M_S / FREQ_HZ) * 1.0e3 / 2.0
 PITCH_MM = ELEMENT_SIZE_MM + 0.1
 HALF_APERTURE_MM = (N_ELEMENTS - 1) * PITCH_MM / 2.0
+DEFECT_EDGE_MARGIN_MM = 1.0
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Generate raw 32x32 FMC NPY files with randomized circular defects."
     )
-    parser.add_argument("--output-dir", type=Path, default=Path("fmc60mm_dataset"))
+    parser.add_argument("--output-dir", type=Path, default=Path("fmc30mm_2MHz_dataset"))
     parser.add_argument("--count", type=int, default=20)
     parser.add_argument("--start-index", type=int, default=0)
     parser.add_argument("--seed", type=int, default=20260723)
@@ -51,8 +52,14 @@ def parse_args():
     parser.add_argument("--max-diameter-mm", type=float, default=5.0)
     parser.add_argument("--min-depth-mm", type=float, default=HEIGHT_MM * 0.2)
     parser.add_argument("--max-depth-mm", type=float, default=HEIGHT_MM * 0.8)
-    parser.add_argument("--lateral-limit-mm", type=float, default=8.0)
-    return parser.parse_args()
+    parser.add_argument("--lateral-limit-mm", type=float, default=None)
+    args = parser.parse_args()
+    if args.lateral_limit_mm is None:
+        args.lateral_limit_mm = min(
+            HALF_APERTURE_MM,
+            WIDTH_MM / 2.0 - args.max_diameter_mm / 2.0 - DEFECT_EDGE_MARGIN_MM,
+        )
+    return args
 
 
 def validate_args(args):
