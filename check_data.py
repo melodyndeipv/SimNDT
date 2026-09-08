@@ -11,7 +11,7 @@ from scipy.signal import hilbert as _hilbert
 # ─── Simulation parameters (must match array_simulation.py) ──────────────────
 VL = 5850.0  # m/s  longitudinal wave speed in steel
 VT = 3220.0  # m/s  shear wave speed in steel
-FREQ_MHZ = 10.0  # MHz
+FREQ_MHZ = 2.0  # MHz
 FREQ_HZ = FREQ_MHZ * 1e6
 PointCycle = 15
 N_CYCLES = 5  # GaussianSine burst cycles
@@ -30,8 +30,8 @@ PITCH_MM = ELEM_SIZE_MM + 0.1
 HALF_SPAN = (N_ELEMENTS - 1) * PITCH_MM / 2.0
 
 # ─── Load generated FMC data and defect metadata ─────────────────────────────
-FMC_PATH = Path("fmc30mm_10MHz_dataset/fmc_00009.npy")
-METADATA_PATH = Path("fmc30mm_10MHz_dataset/metadata.csv")
+FMC_PATH = Path("fmc30mm_2MHz_dataset/fmc_00000.npy")
+METADATA_PATH = Path("fmc30mm_2MHz_dataset/metadata.csv")
 
 with METADATA_PATH.open(newline="", encoding="ascii") as metadata_file:
     metadata = next(

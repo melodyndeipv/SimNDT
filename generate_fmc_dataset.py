@@ -44,7 +44,7 @@ def parse_args():
         description="Generate raw 32x32 FMC NPY files with randomized circular defects."
     )
     parser.add_argument("--output-dir", type=Path, default=Path("fmc30mm_2MHz_dataset"))
-    parser.add_argument("--count", type=int, default=20)
+    parser.add_argument("--count", type=int, default=1)
     parser.add_argument("--start-index", type=int, default=0)
     parser.add_argument("--seed", type=int, default=20260723)
     parser.add_argument("--defect-count", type=int, default=1)
