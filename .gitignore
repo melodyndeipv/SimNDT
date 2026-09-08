@@ -23,3 +23,9 @@ env/
 *.npy
 
 *.csv
+
+# coding agent skills
+.agents
+.claude
+claude.md
+skills-lock.json
