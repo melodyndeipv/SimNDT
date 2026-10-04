@@ -320,6 +320,23 @@ class EFIT2D(EngineBase):
 
         self.program = cl.Program(self.ctx, self.kernel()).build()
 
+        # Cache kernel objects once instead of looking them up by attribute
+        # name on every call (self.program.<name>(...) creates a brand-new
+        # cl.Kernel wrapper each time it's invoked, which PyOpenCL warns
+        # about as RepeatedKernelRetrieval and adds needless overhead when
+        # run() executes thousands of times).
+        self._kernels = {
+            name: cl.Kernel(self.program, name)
+            for name in (
+                "Velocity_EFIT2D_Voigt",
+                "Stress_EFIT2D_Voigt",
+                "Source_Vel_EFIT2D",
+                "Source_EFIT2D",
+            )
+        }
+        if self._Receiver:
+            self._kernels["Receiver_EFIT2D"] = cl.Kernel(self.program, "Receiver_EFIT2D")
+
     def receiverSetup(self):
         TimeSteps = int(self.simPack.Simulation.TimeSteps)
         # For FMC: single transmitter × multiple receivers
@@ -330,7 +347,7 @@ class EFIT2D(EngineBase):
 
         if self._Receiver:
             # Run one work-item per element and average its surface-node span.
-            self.program.Receiver_EFIT2D(self.queue, (self.N_recv,), None, self.Txx_buf, self.receiver_buf,
+            self._kernels["Receiver_EFIT2D"](self.queue, (self.N_recv,), None, self.Txx_buf, self.receiver_buf,
                                          np.int32(self.n), np.int32(self.N_recv), np.int32(self.N_recv_nodes),
                                          self.XXL_buf, self.YYL_buf).wait()
         else:
@@ -347,27 +364,27 @@ class EFIT2D(EngineBase):
     def run(self):
 
         y = np.float32(self.source[self.n])
-        self.program.Velocity_EFIT2D_Voigt(self.queue, (self.NRI, self.MRI,), None,
+        self._kernels["Velocity_EFIT2D_Voigt"](self.queue, (self.NRI, self.MRI,), None,
                                            self.Txx_buf, self.Txy_buf, self.Tyy_buf,
                                            self.Vx_buf, self.Vy_buf, self.DVx_buf, self.DVy_buf,
                                            self.BX_buf, self.BY_buf, self.ABS_buf, self.ddx).wait()
 
         if self.typeSource == 1 or self.typeSource == 2:
-            self.program.Source_Vel_EFIT2D(self.queue, (self.NX,), None,
+            self._kernels["Source_Vel_EFIT2D"](self.queue, (self.NX,), None,
                                            self.Vx_buf,
                                            self.Vy_buf,
                                            self.XL_buf,
                                            self.YL_buf,
                                            y, self.typeWave, self.WIN_buf).wait()
 
-        self.program.Stress_EFIT2D_Voigt(self.queue, (self.NRI, self.MRI,), None,
+        self._kernels["Stress_EFIT2D_Voigt"](self.queue, (self.NRI, self.MRI,), None,
                                          self.Txx_buf, self.Txy_buf, self.Tyy_buf,
                                          self.Vx_buf, self.Vy_buf, self.DVx_buf, self.DVy_buf,
                                          self.C11_buf, self.C12_buf, self.C44_buf, self.ETA_vs_buf,
                                          self.ETA_s_buf, self.ETA_ss_buf, self.ABS_buf).wait()
 
         if self.typeSource == 0 or self.typeSource == 2:
-            self.program.Source_EFIT2D(self.queue, (self.NX,), None,
+            self._kernels["Source_EFIT2D"](self.queue, (self.NX,), None,
                                        self.Txx_buf,
                                        self.Tyy_buf,
                                        self.Txy_buf,

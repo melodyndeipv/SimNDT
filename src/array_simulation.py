@@ -10,6 +10,8 @@ Output:          FMC data array: (TX, RX, TimeSteps) = (N_TX, N_RX, TimeSteps)
 
 import sys
 import os
+import json
+from pathlib import Path
 import numpy as np
 import matplotlib
 
@@ -19,7 +21,81 @@ from math import pi
 
 SHOW_PLOTS = os.environ.get("SIMNDT_SHOW_PLOTS", "1") == "1"
 FMC_OUTPUT_PATH = os.environ.get("SIMNDT_FMC_OUTPUT", "fmc_data.npy")
-REQUIRE_GPU = os.environ.get("SIMNDT_REQUIRE_GPU", "0") == "1"
+REQUIRE_GPU = os.environ.get("SIMNDT_REQUIRE_GPU", "1") == "1"
+APPLY_ATTENUATION = os.environ.get("SIMNDT_APPLY_ATTENUATION", "0") == "1"
+ATTENUATION_DB_PER_MM = float(os.environ.get("SIMNDT_ATTENUATION_DB_PER_MM", "0.25"))
+
+
+def apply_time_varying_attenuation(
+    fmc_matrix, dt, velocity_m_s, coefficient_db_per_mm=0.25
+):
+    """Apply time-varying material attenuation to an FMC dataset.
+
+    Models frequency-independent amplitude loss along the wave's propagation
+    path: samples further along the time axis (and therefore further
+    travelled) are attenuated more strongly, following Beer-Lambert-style
+    exponential decay ``A(t) = A0 * exp(-alpha * distance(t))``.
+
+    Parameters
+    ----------
+    fmc_matrix : np.ndarray, shape (N_TX, N_RX, TimeSteps)
+        Raw FMC data, following this project's ``[transmitter, receiver,
+        time]`` convention.
+    dt : float
+        Simulation time step in seconds (``simulation.dt``).
+    velocity_m_s : float
+        Wave speed (m/s) used to convert elapsed time into propagation
+        distance.
+    coefficient_db_per_mm : float, optional
+        Material attenuation coefficient at the excitation frequency, given
+        in dB/mm (default: 0.25 dB/mm @ 5 MHz).
+
+    Returns
+    -------
+    np.ndarray
+        Attenuated FMC matrix with the same shape and dtype as the input.
+    """
+    n_samples = fmc_matrix.shape[-1]
+
+    # dB/mm -> dB/m -> Nepers/m  (1 Np = 20*log10(e) dB ~= 8.685889638 dB)
+    coefficient_db_per_m = coefficient_db_per_mm * 1.0e3
+    coefficient_np_per_m = coefficient_db_per_m / 8.685889638
+
+    # One-way propagation distance travelled by the wavefront by sample n.
+    time_axis_s = np.arange(n_samples, dtype=np.float64) * dt
+    distance_m = velocity_m_s * time_axis_s
+
+    decay = np.exp(-coefficient_np_per_m * distance_m).astype(fmc_matrix.dtype)
+
+    # Broadcast the 1D decay vector across (TX, RX, Time) - no Python loops.
+    return (fmc_matrix * decay[np.newaxis, np.newaxis, :]).astype(fmc_matrix.dtype)
+
+
+def assert_gpu_device(engine):
+    """Verify the engine is actually executing on a GPU OpenCL device.
+
+    ``EngineBase.initCL`` silently falls back to ``platforms[0].devices[0]``
+    if the requested platform/device name isn't found on the system, which
+    could select a CPU OpenCL device without raising any error. Call this
+    right after constructing an ``EFIT2D`` engine to fail loudly instead of
+    quietly simulating on the CPU.
+    """
+    if engine.Platform != "OpenCL":
+        raise RuntimeError(
+            f"Engine platform is {engine.Platform!r}, not 'OpenCL'; "
+            "GPU execution was requested but not used."
+        )
+    import pyopencl as cl
+
+    device = engine.ctx.devices[0]
+    device_type = cl.device_type.to_string(device.type)
+    if "GPU" not in device_type:
+        raise RuntimeError(
+            f"Engine fell back to a non-GPU OpenCL device "
+            f"({device.name!r}, type={device_type!r}); refusing to continue."
+        )
+    print(f"Confirmed GPU execution on: {device.name!r} (type={device_type!r})")
+    return device
 
 # ── make sure src/ is on the path ────────────────────────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -106,7 +182,7 @@ materials = [air, steel]  # label 0 = air/void, label 1 = steel
 # ─────────────────────────────────────────────────────────────────────────────
 # 2.  SCENARIO  –  40 mm wide × 30 mm deep, filled with steel
 # ─────────────────────────────────────────────────────────────────────────────
-WIDTH_MM = 50  # mm
+WIDTH_MM = 40  # mm
 HEIGHT_MM = 30  # mm
 PIXEL_MM = 10  # pixels per mm  (geometric resolution of the model image)
 
@@ -155,7 +231,7 @@ else:
         {
             "x_mm": float(os.environ.get("SIMNDT_HOLE_X_MM", WIDTH_MM / 2)),
             "y_mm": float(os.environ.get("SIMNDT_HOLE_Y_MM", HEIGHT_MM / 2)),
-            "d_mm": float(os.environ.get("SIMNDT_HOLE_D_MM", 5.0)),
+            "d_mm": float(os.environ.get("SIMNDT_HOLE_D_MM", 2.0)),
         }
     ]
 
@@ -459,6 +535,8 @@ for tx_idx in range(N_TX):
 
     # Create engine for this transmitter
     engine = EFIT2D(simpack, Platform=PLATFORM)
+    if tx_idx == 0:
+        assert_gpu_device(engine)
 
     # Get execution function
     exec_func = getattr(engine, exec_func_name)
@@ -489,8 +567,50 @@ print(f"  Receivers: {fmc_matrix.shape[1]}")
 print(f"  TimeSteps: {fmc_matrix.shape[2]}")
 print(f"  Total channels: {N_TX * N_TX} = {N_TX} TX × {N_TX} RX")
 
+if APPLY_ATTENUATION:
+    print(
+        f"\nApplying time-varying attenuation: {ATTENUATION_DB_PER_MM:.3f} dB/mm @ "
+        f"{FREQ_MHZ:.1f} MHz (velocity={VL:.0f} m/s)"
+    )
+    fmc_matrix = apply_time_varying_attenuation(
+        fmc_matrix, dt=simulation.dt, velocity_m_s=VL,
+        coefficient_db_per_mm=ATTENUATION_DB_PER_MM,
+    )
+
 # Save in (TX, RX, TimeSteps) format
 np.save(FMC_OUTPUT_PATH, fmc_matrix)
 print(f"\nFMC data saved to: {FMC_OUTPUT_PATH}")
 print(f"  Load with: fmc = np.load('fmc_data.npy')")
 print(f"  Access signal: fmc[tx_idx, rx_idx, time_step]")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 11. METADATA SIDECAR  –  everything a downstream TFM/analysis script needs
+#     (grid step, time step, array geometry, defect location, attenuation).
+# ─────────────────────────────────────────────────────────────────────────────
+metadata_path = str(Path(FMC_OUTPUT_PATH).with_suffix("")) + "_metadata.json"
+metadata = {
+    "VL_m_s": VL,
+    "VT_m_s": VT,
+    "freq_mhz": FREQ_MHZ,
+    "dx_m": float(simulation.dx),
+    "dt_s": float(simulation.dt),
+    "time_steps": int(simulation.TimeSteps),
+    "width_mm": WIDTH_MM,
+    "height_mm": HEIGHT_MM,
+    "n_elements": N_ELEMENTS,
+    "pitch_mm": PITCH,
+    "half_span_mm": HALF_SPAN,
+    "defects": [
+        {
+            "x_mm_centred": defect["x_mm"] - WIDTH_MM / 2,
+            "depth_mm": defect["y_mm"],
+            "diameter_mm": defect["d_mm"],
+        }
+        for defect in defects
+    ],
+    "attenuation_applied": APPLY_ATTENUATION,
+    "attenuation_db_per_mm": ATTENUATION_DB_PER_MM if APPLY_ATTENUATION else None,
+}
+with open(metadata_path, "w", encoding="utf-8") as fh:
+    json.dump(metadata, fh, indent=2)
+print(f"Metadata saved to: {metadata_path}")

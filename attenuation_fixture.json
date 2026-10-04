@@ -1,0 +1,13 @@
+[
+  {
+    "material": "AISI 304",
+    "material_condition": "Solution annealed at 20 C",
+    "source": "Verified reference value supplied by the user",
+    "verified": true,
+    "coefficients": [
+      { "frequency_hz": 2000000, "coefficient_db_per_mm": 0.06 },
+      { "frequency_hz": 5000000, "coefficient_db_per_mm": 0.25 },
+      { "frequency_hz": 10000000, "coefficient_db_per_mm": 0.95 }
+    ]
+  }
+]
